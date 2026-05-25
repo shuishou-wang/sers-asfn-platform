@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SERS糖尿病辅助检测平台</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="主导航">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <div>
+            <h1>SERS糖尿病辅助检测平台</h1>
+            <p>Lab Analysis Workstation</p>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <button class="nav-item active" data-view="workbench" type="button">
+            <span class="nav-icon">01</span>
+            <span>工作台</span>
+          </button>
+          <button class="nav-item" data-view="spectrum" type="button">
+            <span class="nav-icon">02</span>
+            <span>光谱分析</span>
+          </button>
+          <button class="nav-item" data-view="interpretation" type="button">
+            <span class="nav-icon">03</span>
+            <span>结果判读</span>
+          </button>
+          <button class="nav-item" data-view="report" type="button">
+            <span class="nav-icon">04</span>
+            <span>报告中心</span>
+          </button>
+        </nav>
+
+        <div class="sidebar-footer">
+          <div class="mini-label">System status</div>
+          <div class="status-dot-row"><span class="dot ok"></span><span>分析服务在线</span></div>
+          <div class="status-dot-row"><span class="dot watch"></span><span>报告复核待处理</span></div>
+        </div>
+      </aside>
+
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">当前样本检测</p>
+            <h2 id="top-title">加载检测数据中</h2>
+          </div>
+          <div class="topbar-actions">
+            <button class="ghost-button" id="review-button" type="button">进入复核</button>
+            <button class="primary-button" id="report-button" type="button">生成报告</button>
+          </div>
+        </header>
+
+        <section class="sample-strip" id="sample-strip" aria-label="样本信息"></section>
+
+        <section class="view active" id="view-workbench" aria-label="工作台">
+          <div class="layout-grid workbench-grid">
+            <section class="panel panel-wide">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Result overview</p>
+                  <h3>检测结果概览</h3>
+                </div>
+                <span class="panel-meta" id="overview-meta">--</span>
+              </div>
+              <div class="upload-module">
+                <div class="upload-zone" id="upload-zone">
+                  <input id="spectrum-file" class="file-input" type="file" accept=".csv,.txt,.tsv" />
+                  <div>
+                    <p class="section-kicker">Spectrum import</p>
+                    <h4>光谱导入与自动分析</h4>
+                    <span id="upload-message">支持 CSV、TXT 或 TSV 光谱文件；可使用内置示例光谱进行流程演示。</span>
+                  </div>
+                  <div class="upload-actions">
+                    <button class="ghost-button compact" id="choose-file" type="button">选择光谱文件</button>
+                    <button class="ghost-button compact" id="demo-spectrum" type="button">使用示例光谱</button>
+                    <button class="primary-button compact" id="run-analysis" type="button">开始分析</button>
+                  </div>
+                </div>
+                <div class="pipeline-steps" id="pipeline-steps"></div>
+                <div class="upload-stats" id="upload-stats"></div>
+                <div class="spectrum-selection" id="spectrum-selection"></div>
+                <div class="analysis-contract" id="analysis-contract"></div>
+              </div>
+              <div class="summary-cards" id="summary-cards"></div>
+              <div class="indicator-grid" id="indicator-grid"></div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Quality control</p>
+                  <h3>光谱质量检查</h3>
+                </div>
+              </div>
+              <div class="qc-list" id="qc-list"></div>
+              <div class="decision-box" id="decision-box"></div>
+              <div class="history-panel">
+                <div class="history-header">
+                  <strong>最近分析记录</strong>
+                  <span id="history-count">0</span>
+                </div>
+                <div class="history-list" id="history-list"></div>
+              </div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-spectrum" aria-label="光谱分析">
+          <div class="layout-grid spectrum-grid">
+            <section class="panel panel-wide">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">SERS spectrum</p>
+                  <h3>平均光谱分析</h3>
+                </div>
+                <div class="chart-tools">
+                  <button class="tool-chip active" data-spectrum-mode="stacked" type="button">叠加谱</button>
+                  <button class="tool-chip" data-spectrum-mode="focus" type="button">重点谱段</button>
+                </div>
+              </div>
+              <div class="chart-card">
+                <svg id="spectrum-chart" role="img" aria-label="平均SERS光谱"></svg>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Band evidence</p>
+                  <h3>关键谱段</h3>
+                </div>
+              </div>
+              <div class="shift-group">
+                <p>识别相关位移</p>
+                <div id="class-shifts" class="shift-tags"></div>
+              </div>
+              <div class="shift-group">
+                <p>定量相关位移</p>
+                <div id="reg-shifts" class="shift-tags"></div>
+              </div>
+              <div class="band-list" id="band-list"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-interpretation" aria-label="结果判读">
+          <div class="layout-grid interpretation-grid">
+            <section class="panel panel-wide">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Quantitative review</p>
+                  <h3>检测指标判读</h3>
+                </div>
+                <span class="panel-meta">状态基于当前平台辅助区间</span>
+              </div>
+              <div class="table-wrap">
+                <table class="result-table">
+                  <thead>
+                    <tr>
+                      <th>指标</th>
+                      <th>预测值</th>
+                      <th>辅助区间</th>
+                      <th>状态</th>
+                      <th>R²</th>
+                      <th>F1</th>
+                      <th>复测数</th>
+                    </tr>
+                  </thead>
+                  <tbody id="result-table-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Model summary</p>
+                  <h3>分析性能摘要</h3>
+                </div>
+              </div>
+              <div id="metric-bars" class="metric-bars"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="view" id="view-report" aria-label="报告中心">
+          <div class="layout-grid report-grid">
+            <section class="panel panel-wide report-preview">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Report archive</p>
+                  <h3>检测报告</h3>
+                </div>
+                <span class="report-state" id="report-state">待复核</span>
+              </div>
+              <div id="report-preview"></div>
+            </section>
+
+            <aside class="panel">
+              <div class="panel-heading">
+                <div>
+                  <p class="section-kicker">Review desk</p>
+                  <h3>复核与归档</h3>
+                </div>
+              </div>
+              <ol class="workflow-list" id="workflow-list">
+                <li class="done"><span>1</span>光谱采集完成</li>
+                <li class="done"><span>2</span>质量检查通过</li>
+                <li class="done"><span>3</span>智能分析完成</li>
+                <li class="active"><span>4</span>人工复核</li>
+                <li><span>5</span>报告归档</li>
+              </ol>
+              <div class="sample-editor">
+                <strong>样本信息</strong>
+                <label>
+                  <span>样本编号</span>
+                  <input id="sample-id-input" type="text" />
+                </label>
+                <label>
+                  <span>检测批次</span>
+                  <input id="sample-batch-input" type="text" />
+                </label>
+                <label>
+                  <span>样本类型</span>
+                  <input id="sample-type-input" type="text" />
+                </label>
+                <label>
+                  <span>报告编号</span>
+                  <input id="report-id-input" type="text" />
+                </label>
+                <label>
+                  <span>检测人员</span>
+                  <input id="operator-input" type="text" />
+                </label>
+                <label>
+                  <span>复核人员</span>
+                  <input id="reviewer-input" type="text" />
+                </label>
+                <label>
+                  <span>复核备注</span>
+                  <textarea id="sample-note-input" rows="3"></textarea>
+                </label>
+                <button class="ghost-button compact" id="save-sample-info" type="button">保存样本信息</button>
+              </div>
+              <div class="export-actions">
+                <strong>报告导出</strong>
+                <button class="ghost-button compact" id="export-json" type="button">导出分析记录</button>
+                <button class="primary-button compact" id="export-html" type="button">导出报告快照</button>
+              </div>
+              <div class="note-card">
+                <strong>使用边界</strong>
+                <p>平台结果用于科研场景下的辅助分析和复核提示，不替代临床诊断结论。</p>
+              </div>
+            </aside>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
