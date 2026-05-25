@@ -61,15 +61,45 @@
 
         <section class="sample-strip" id="sample-strip" aria-label="样本信息"></section>
 
+        <section class="stage-tabs" aria-label="检测流程">
+          <button class="stage-tab active" data-view="workbench" type="button">
+            <span>01</span>
+            <strong>光谱导入</strong>
+            <em>Upload</em>
+          </button>
+          <button class="stage-tab" data-view="spectrum" type="button">
+            <span>02</span>
+            <strong>质控预览</strong>
+            <em>QC Review</em>
+          </button>
+          <button class="stage-tab" data-view="interpretation" type="button">
+            <span>03</span>
+            <strong>ASFN分析</strong>
+            <em>Inference</em>
+          </button>
+          <button class="stage-tab" data-view="report" type="button">
+            <span>04</span>
+            <strong>报告复核</strong>
+            <em>Report</em>
+          </button>
+        </section>
+
         <section class="view active" id="view-workbench" aria-label="工作台">
           <div class="layout-grid workbench-grid">
             <section class="panel panel-wide">
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">Result overview</p>
-                  <h3>检测结果概览</h3>
+                  <h3>单光谱导入工作台</h3>
                 </div>
                 <span class="panel-meta" id="overview-meta">--</span>
+              </div>
+              <div class="workflow-hero">
+                <div>
+                  <strong>上传光谱后，系统将完成格式识别、自动质控、ASFN定性判别和对应标志物浓度预测。</strong>
+                  <p>当前页面仅保留导入与任务状态，分析后可切换至后续页面查看光谱、结果和报告。</p>
+                </div>
+                <button class="ghost-button compact" data-view-jump="spectrum" type="button">查看质控页</button>
               </div>
               <div class="upload-module">
                 <div class="upload-zone" id="upload-zone">
@@ -89,6 +119,14 @@
                 <div class="upload-stats" id="upload-stats"></div>
                 <div class="spectrum-selection" id="spectrum-selection"></div>
                 <div class="analysis-contract" id="analysis-contract"></div>
+              </div>
+              <div class="workbench-next-card">
+                <div>
+                  <p class="section-kicker">Next step</p>
+                  <strong>导入完成后进入质控预览页查看光谱曲线。</strong>
+                  <span>分析完成后结果页仅显示定性结果、对应浓度预测和模型摘要。</span>
+                </div>
+                <button class="primary-button compact" data-view-jump="spectrum" type="button">打开光谱预览</button>
               </div>
               <div class="summary-cards" id="summary-cards"></div>
               <div class="indicator-grid" id="indicator-grid"></div>
@@ -123,6 +161,7 @@
                   <h3>输入光谱分析</h3>
                 </div>
                 <div class="chart-tools">
+                  <button class="primary-button compact" id="run-analysis-spectrum" type="button">开始ASFN分析</button>
                   <button class="tool-chip active" data-spectrum-mode="stacked" type="button">叠加谱</button>
                   <button class="tool-chip" data-spectrum-mode="focus" type="button">重点谱段</button>
                 </div>

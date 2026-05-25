@@ -504,6 +504,23 @@ function renderSpectrumSelection() {
       </div>
     `)
     .join("") || "";
+  if (result.candidates.length === 1) {
+    target.innerHTML = `
+      <div class="single-import-line">
+        <div>
+          <p class="section-kicker">Import recognition</p>
+          <strong>${result.layoutLabel} · ${result.hasWavenumberAxis ? "已识别拉曼位移轴" : "按默认位移轴处理"}</strong>
+          <span>${interpretation.reportHint}</span>
+        </div>
+        <div class="single-import-result">
+          <span>定性候选</span>
+          <strong>${prediction ? `${prediction.marker} · ${prediction.name}` : "等待识别"}</strong>
+          <em>${prediction ? `置信度 ${pct(prediction.confidence)}` : "导入后显示"}</em>
+        </div>
+      </div>
+    `;
+    return;
+  }
   target.innerHTML = `
     <div class="selection-header">
       <div>
@@ -795,6 +812,51 @@ function normalize(values) {
   return values.map((value) => (value - min) / span);
 }
 
+function renderUploadSpectrumPreview() {
+  const svg = el("#upload-spectrum-preview");
+  const meta = el("#preview-meta");
+  if (!svg) return;
+  const spectrum = state.uploadedSpectrum;
+  const viewBox = { w: 620, h: 220, left: 48, right: 22, top: 18, bottom: 42 };
+  if (!spectrum?.points?.length) {
+    if (meta) meta.textContent = "等待导入";
+    svg.outerHTML = `
+      <svg id="upload-spectrum-preview" role="img" aria-label="导入光谱预览" viewBox="0 0 ${viewBox.w} ${viewBox.h}" xmlns="http://www.w3.org/2000/svg">
+        <rect x="1.5" y="1.5" width="${viewBox.w - 3}" height="${viewBox.h - 3}" rx="14" fill="#ffffff" stroke="#17222d" stroke-width="3"/>
+        <path d="M68,143 C122,108 176,134 230,95 S338,118 392,78 500,120 552,82" fill="none" stroke="#b9c8d1" stroke-width="3" stroke-linecap="round"/>
+        <text class="chart-label" x="${viewBox.w / 2}" y="112" text-anchor="middle" fill="#6d7a86">导入后显示当前光谱曲线</text>
+      </svg>
+    `;
+    return;
+  }
+  const points = spectrum.points.filter((item) => item.wavenumber >= 400 && item.wavenumber <= 1800);
+  if (meta) meta.textContent = `${points.length} 点 · ${Math.round(spectrum.range[0])}-${Math.round(spectrum.range[1])} cm⁻¹`;
+  if (!points.length) return;
+  const values = normalize(points.map((item) => item.intensity));
+  const plotW = viewBox.w - viewBox.left - viewBox.right;
+  const plotH = viewBox.h - viewBox.top - viewBox.bottom;
+  const x = (wn) => viewBox.left + ((wn - 400) / 1400) * plotW;
+  const y = (value) => viewBox.top + (1 - value) * plotH;
+  const d = values
+    .map((value, index) => `${index === 0 ? "M" : "L"}${x(points[index].wavenumber).toFixed(2)},${y(value).toFixed(2)}`)
+    .join(" ");
+  const ticks = [400, 700, 1000, 1300, 1600, 1800];
+  svg.outerHTML = `
+    <svg id="upload-spectrum-preview" role="img" aria-label="导入光谱预览" viewBox="0 0 ${viewBox.w} ${viewBox.h}" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1.5" y="1.5" width="${viewBox.w - 3}" height="${viewBox.h - 3}" rx="14" fill="#ffffff" stroke="#17222d" stroke-width="3"/>
+      <g stroke="#e0e9ee" stroke-width="1">
+        ${ticks.map((t) => `<line x1="${x(t)}" x2="${x(t)}" y1="${viewBox.top}" y2="${viewBox.h - viewBox.bottom}"/>`).join("")}
+      </g>
+      <line x1="${viewBox.left}" y1="${viewBox.h - viewBox.bottom}" x2="${viewBox.w - viewBox.right}" y2="${viewBox.h - viewBox.bottom}" stroke="#17222d" stroke-width="3"/>
+      <line x1="${viewBox.left}" y1="${viewBox.top}" x2="${viewBox.left}" y2="${viewBox.h - viewBox.bottom}" stroke="#17222d" stroke-width="3"/>
+      ${ticks.map((t) => `<text class="chart-tick" x="${x(t)}" y="${viewBox.h - 16}" text-anchor="middle">${t}</text>`).join("")}
+      <path d="${d}" fill="none" stroke="#168b82" stroke-width="3.4" stroke-linejoin="round" stroke-linecap="round"/>
+      <text class="chart-label" x="${viewBox.left + 6}" y="${viewBox.top + 16}" fill="#193247">${escapeHtml(spectrum.name || "Input spectrum")}</text>
+      <text class="axis-label" x="${viewBox.left + plotW / 2}" y="${viewBox.h - 3}" text-anchor="middle">Raman shift (cm⁻¹)</text>
+    </svg>
+  `;
+}
+
 function renderSpectrumChart(data) {
   const svg = el("#spectrum-chart");
   const interpretation = state.sampleInterpretation;
@@ -1018,6 +1080,7 @@ function renderAll() {
   renderUploadStats();
   renderSpectrumSelection();
   renderAnalysisContract();
+  renderUploadSpectrumPreview();
   renderSampleStrip(data);
   renderSummary(data);
   renderIndicators(data);
@@ -1105,6 +1168,17 @@ function exportReportHtml() {
 <body>${report}</body>
 </html>`;
   downloadTextFile(`${sampleId}_report_snapshot.html`, html, "text/html;charset=utf-8");
+}
+
+function switchView(viewName) {
+  state.activeView = viewName;
+  els(".nav-item").forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
+  els(".stage-tab").forEach((item) => item.classList.toggle("active", item.dataset.view === viewName));
+  els(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${viewName}`));
+  if (viewName === "spectrum") {
+    renderSpectrumChart(state.data);
+    renderUploadSpectrumPreview();
+  }
 }
 
 function saveSampleInfo() {
@@ -1308,6 +1382,7 @@ function importSingleSpectrum(importResult) {
   const multiNote = state.importResult.candidates.length > 1 ? "请在下方选择具体光谱后再开始分析。" : "可直接执行自动质控与分析。";
   setUploadMessage(`已识别 ${state.importResult.candidates.length} 条候选光谱，格式为${state.importResult.layoutLabel}，${multiNote}${state.sampleInterpretation.reportHint}`);
   renderAll();
+  switchView("spectrum");
 }
 
 function parseLegacySingleSpectrum(text, fileName = "uploaded-spectrum") {
@@ -1431,16 +1506,16 @@ function runAnalysis() {
     state.pipeline.analyzed ? "normal" : "error",
   );
   renderAll();
+  if (state.pipeline.analyzed) switchView("interpretation");
 }
 
 function bindEvents() {
   els(".nav-item").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.activeView = button.dataset.view;
-      els(".nav-item").forEach((item) => item.classList.toggle("active", item === button));
-      els(".view").forEach((view) => view.classList.toggle("active", view.id === `view-${state.activeView}`));
-      if (state.activeView === "spectrum") renderSpectrumChart(state.data);
-    });
+    button.addEventListener("click", () => switchView(button.dataset.view));
+  });
+
+  els(".stage-tab, [data-view-jump]").forEach((button) => {
+    button.addEventListener("click", () => switchView(button.dataset.view || button.dataset.viewJump));
   });
 
   els(".tool-chip").forEach((button) => {
@@ -1507,6 +1582,7 @@ function bindEvents() {
   });
 
   el("#run-analysis").addEventListener("click", runAnalysis);
+  el("#run-analysis-spectrum").addEventListener("click", runAnalysis);
 }
 
 async function init() {
