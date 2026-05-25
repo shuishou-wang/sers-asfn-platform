@@ -10,7 +10,7 @@ const state = {
   analysisSubstances: null,
   analysisRequest: null,
   analysisResponse: null,
-  analysisBackend: "ASFN 分析适配层",
+  analysisBackend: "ASFN单光谱分析适配层",
   sampleEdits: {
     note: "",
     operator: "未填写",
@@ -224,10 +224,10 @@ function inferSampleInterpretation(importResult, selectedIndex = state.selectedS
   const prediction = selected?.spectralPrediction;
   const confidence = prediction?.confidence || 0;
   const margin = prediction?.margin || 0;
-  const reliable = selected?.markerHint && confidence >= 0.42 && margin >= 0.035;
+  const reliable = prediction?.marker && confidence >= 0.42 && margin >= 0.035;
 
   if (reliable) {
-    const abbr = selected.markerHint;
+    const abbr = prediction.marker;
     return {
       type: "single_asfn",
       modeLabel: "单光谱定性+定量",
@@ -237,7 +237,7 @@ function inferSampleInterpretation(importResult, selectedIndex = state.selectedS
       predictedMarker: abbr,
       confidence,
       margin,
-      reportHint: `ASFN适配层识别为${substanceMeta[abbr].name}，将仅输出该标志物的浓度预测结果。`,
+      reportHint: `系统识别为${substanceMeta[abbr].name}，将仅输出该标志物的浓度预测结果。`,
     };
   }
 
@@ -250,7 +250,7 @@ function inferSampleInterpretation(importResult, selectedIndex = state.selectedS
     predictedMarker: prediction?.marker || null,
     confidence,
     margin,
-    reportHint: prediction?.marker
+      reportHint: prediction?.marker
       ? `当前光谱最接近${substanceMeta[prediction.marker].name}，但识别置信度不足，暂不输出浓度结果。`
       : "未能确认检测对象，建议补充样本信息或重新采集光谱后再分析。",
   };
@@ -302,7 +302,7 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
       status: "channel_required",
       generatedAt: new Date().toISOString(),
       predictions: [],
-      message: "未确认检测通道，未生成标志物浓度结果。",
+      message: "未达到可靠识别阈值，未生成标志物浓度结果。",
     };
   }
 
@@ -334,6 +334,11 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
     generatedAt: new Date().toISOString(),
     predictions,
     message: "已完成单光谱定性识别与对应标志物浓度预测。",
+    evidence: {
+      basis: "前期ASFN模型结果、糖尿病标志物平均SERS模板和当前光谱质控评分",
+      onlineModelWeights: false,
+      note: "当前网页端未部署深度学习权重文件，结果用于科研辅助展示和复核。",
+    },
   };
 }
 
@@ -475,10 +480,6 @@ function renderSpectrumSelection() {
     result.candidates.length > 1 ? "检测到多条候选光谱，请选择其中一条进入单光谱分析" : "检测到单条候选光谱，可进行定性识别与对应定量",
     interpretation.reportHint,
   ];
-  const markerOptions = (selected) => [
-    `<option value="">通道待确认</option>`,
-    ...panelSubstances.map((abbr) => `<option value="${abbr}" ${selected === abbr ? "selected" : ""}>${abbr} · ${substanceMeta[abbr].name}</option>`),
-  ].join("");
   const cards = result.candidates
     .map((candidate, index) => `
       <article class="spectrum-option ${index === state.selectedSpectrumIndex ? "active" : ""}">
@@ -487,12 +488,6 @@ function renderSpectrumSelection() {
           <span>${candidate.points.length} 点 · ${Math.round(candidate.range[0])}-${Math.round(candidate.range[1])} cm⁻¹</span>
           <em>${candidate.spectralPrediction ? `${candidate.spectralPrediction.marker} · ${candidate.spectralPrediction.name} · 置信度 ${pct(candidate.spectralPrediction.confidence)}` : "待识别"}</em>
         </button>
-        <label>
-          <span>人工复核</span>
-          <select data-marker-index="${index}">
-            ${markerOptions(candidate.markerHint)}
-          </select>
-        </label>
       </article>
     `)
     .join("");
@@ -523,6 +518,10 @@ function renderSpectrumSelection() {
       <div><span>分析模式</span><strong>${interpretation.modeLabel}</strong></div>
       <div><span>模型识别</span><strong>${mapping || "识别置信度不足"}</strong></div>
     </div>
+    <div class="method-note">
+      <strong>分析依据</strong>
+      <span>当前网页端依据前期ASFN结果、六类糖尿病标志物平均SERS模板和输入光谱质控评分组织定性与定量输出；完整深度学习权重尚未部署到网页端。</span>
+    </div>
     <div class="classification-panel">
       <div class="classification-head">
         <div>
@@ -538,11 +537,6 @@ function renderSpectrumSelection() {
   target.querySelectorAll(".spectrum-pick").forEach((button) => {
     button.addEventListener("click", () => {
       selectSpectrum(Number(button.dataset.spectrumIndex));
-    });
-  });
-  target.querySelectorAll("select[data-marker-index]").forEach((select) => {
-    select.addEventListener("change", () => {
-      updateCandidateMarker(Number(select.dataset.markerIndex), select.value || null);
     });
   });
 }
@@ -577,6 +571,10 @@ function renderAnalysisContract() {
       <div><span>预测对象</span><strong class="marker-list">${markers}</strong></div>
       <div><span>识别置信度</span><strong>${interpretation.confidence ? pct(interpretation.confidence) : "待确认"}</strong></div>
       <div><span>候选间隔</span><strong>${interpretation.margin ? pct(interpretation.margin) : "待确认"}</strong></div>
+    </div>
+    <div class="method-note compact-note">
+      <strong>模型接入状态</strong>
+      <span>网页端展示为ASFN结果适配层，未加载.pth权重；定量结果来自前期ASFN平均浓度预测结果并按当前光谱质控状态修正。</span>
     </div>
   `;
 }
@@ -631,19 +629,6 @@ function selectSpectrum(index) {
   state.qc = computeQc(state.uploadedSpectrum);
   resetAnalysisState();
   setUploadMessage(`已选择 ${state.uploadedSpectrum.name}，${state.sampleInterpretation.reportHint}`);
-  renderAll();
-}
-
-function updateCandidateMarker(index, marker) {
-  if (!state.importResult?.candidates[index]) return;
-  state.importResult.candidates[index].markerHint = marker;
-  state.selectedSpectrumIndex = index;
-  state.uploadedSpectrum = state.importResult.candidates[index];
-  setInterpretation(state.importResult, index);
-  state.qc = computeQc(state.uploadedSpectrum);
-  resetAnalysisState();
-  const markerText = marker ? `${state.uploadedSpectrum.name} 已设为 ${marker} 通道。` : `${state.uploadedSpectrum.name} 的检测通道已清空。`;
-  setUploadMessage(`${markerText}${state.sampleInterpretation.reportHint}`);
   renderAll();
 }
 
@@ -741,9 +726,7 @@ function renderQc(data) {
     .map((item) => item.name)
     .join("、");
 
-  const prefix = state.sampleInterpretation && !state.sampleInterpretation.completePanel
-    ? `${state.sampleInterpretation.reportHint}`
-    : "";
+  const prefix = state.sampleInterpretation ? `${state.sampleInterpretation.reportHint}` : "";
   el("#decision-box").innerHTML = `
     <strong>综合提示</strong>
     <p>${prefix ? `${prefix} ` : ""}${data.substances.length ? (review ? `${review} 当前结果提示需要复核。` : "当前检测指标未触发复核提示。") : "当前未生成标志物浓度结果。"}${
@@ -956,14 +939,10 @@ function renderReport(data) {
       </div>
     `)
     .join("") || `<div class="report-result"><span>检测通道</span><strong>待确认</strong></div>`;
-  const reportTitle = interpretation.completePanel
-    ? "糖尿病标志物 SERS 辅助检测报告"
-    : interpretation.type === "single_asfn"
+  const reportTitle = interpretation.type === "single_asfn"
       ? `${substanceMeta[interpretation.substances[0]]?.name || "单项标志物"} SERS 辅助分析报告`
       : "SERS 光谱通道确认报告";
-  const reportScope = interpretation.completePanel
-    ? "本报告覆盖糖尿病相关标志物面板，用于科研场景下的多指标辅助分析。"
-    : interpretation.type === "single_asfn"
+  const reportScope = interpretation.type === "single_asfn"
       ? `本报告基于单条输入光谱完成定性识别，并仅输出 ${substanceMeta[interpretation.substances[0]]?.name || "当前标志物"} 的对应浓度预测结果。`
       : "当前光谱尚未确认检测通道，报告仅记录导入识别和质量检查结果。";
   const statusText = response?.status === "completed"
@@ -999,10 +978,15 @@ function renderReport(data) {
       <div class="report-status-grid">
         <div><span>分析状态</span><strong>${statusText}</strong></div>
         <div><span>分析模式</span><strong>${interpretation.modeLabel || "等待光谱"}</strong></div>
-        <div><span>输出通道</span><strong>${interpretation.substances?.length ? interpretation.substances.join("、") : "待确认"}</strong></div>
+        <div><span>预测对象</span><strong>${interpretation.substances?.length ? interpretation.substances.join("、") : "待确认"}</strong></div>
+        <div><span>识别置信度</span><strong>${interpretation.confidence ? pct(interpretation.confidence) : "待确认"}</strong></div>
       </div>
       ${noteMarkup}
       <div class="report-grid-list">${resultCards}</div>
+      <div class="report-section">
+        <strong>分析依据</strong>
+        <p>当前报告依据前期ASFN模型结果、糖尿病标志物平均SERS模板、输入光谱相似性排序和自动质控评分生成。网页端用于科研辅助展示和复核提示，尚未部署完整深度学习权重文件。</p>
+      </div>
       <div class="report-summary">
         <strong>综合提示：</strong>
         <span>${summaryText}本报告用于科研辅助分析，结果解释应结合样本背景和实验条件。</span>
@@ -1437,11 +1421,7 @@ function runAnalysis() {
   state.data = applyAnalysisResponse(state.rawData, state.uploadedSpectrum, state.analysisResponse);
   state.data.sample.reportStatus = state.reportStatus;
   addAnalysisHistory();
-  const targetLabel = state.sampleInterpretation.completePanel
-    ? "完整检测面板"
-    : state.sampleInterpretation.type === "partial_panel"
-      ? "部分检测通道"
-      : state.uploadedSpectrum.name;
+  const targetLabel = state.uploadedSpectrum.name;
   setUploadMessage(
     state.pipeline.analyzed
       ? `已完成 ${targetLabel} 的光谱解析、自动质控和分析结果生成。${state.sampleInterpretation.reportHint}`

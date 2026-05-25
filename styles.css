@@ -607,6 +607,33 @@ button {
   white-space: nowrap;
 }
 
+.method-note {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(216, 131, 39, 0.22);
+  border-radius: 14px;
+  background: rgba(240, 177, 90, 0.1);
+}
+
+.method-note strong {
+  color: #6f4a12;
+  font-size: 13px;
+}
+
+.method-note span,
+.method-note p {
+  margin: 0;
+  color: #617180;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.compact-note {
+  margin-top: 12px;
+}
+
 .classification-panel {
   margin-top: 14px;
   padding: 16px;
