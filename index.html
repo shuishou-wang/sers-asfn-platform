@@ -50,7 +50,7 @@
       <main class="main">
         <header class="topbar">
           <div>
-            <p class="eyebrow">当前样本检测</p>
+            <p class="eyebrow">单光谱辅助分析</p>
             <h2 id="top-title">加载检测数据中</h2>
           </div>
           <div class="topbar-actions">
@@ -76,8 +76,8 @@
                   <input id="spectrum-file" class="file-input" type="file" accept=".csv,.txt,.tsv" />
                   <div>
                     <p class="section-kicker">Spectrum import</p>
-                    <h4>光谱导入与自动分析</h4>
-                    <span id="upload-message">支持 CSV、TXT 或 TSV 光谱文件；可使用内置示例光谱进行流程演示。</span>
+                    <h4>单条光谱导入与ASFN分析</h4>
+                    <span id="upload-message">支持 CSV、TXT 或 TSV 光谱文件；系统将先识别标志物类别，再输出对应浓度预测。</span>
                   </div>
                   <div class="upload-actions">
                     <button class="ghost-button compact" id="choose-file" type="button">选择光谱文件</button>
@@ -120,7 +120,7 @@
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">SERS spectrum</p>
-                  <h3>平均光谱分析</h3>
+                  <h3>输入光谱分析</h3>
                 </div>
                 <div class="chart-tools">
                   <button class="tool-chip active" data-spectrum-mode="stacked" type="button">叠加谱</button>
@@ -158,7 +158,7 @@
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">Quantitative review</p>
-                  <h3>检测指标判读</h3>
+                  <h3>定性与定量结果判读</h3>
                 </div>
                 <span class="panel-meta">状态基于当前平台辅助区间</span>
               </div>

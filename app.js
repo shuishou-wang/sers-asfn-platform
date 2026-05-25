@@ -117,10 +117,93 @@ function detectMarkerFromText(text = "") {
   return null;
 }
 
+function interpolateSpectrum(points, axis) {
+  if (!points?.length || !axis?.length) return [];
+  const sorted = [...points].sort((a, b) => a.wavenumber - b.wavenumber);
+  let j = 0;
+  return axis.map((wn) => {
+    while (j < sorted.length - 2 && sorted[j + 1].wavenumber < wn) j += 1;
+    const left = sorted[j];
+    const right = sorted[Math.min(j + 1, sorted.length - 1)];
+    if (!left || !right) return 0;
+    if (wn <= left.wavenumber) return left.intensity;
+    if (wn >= right.wavenumber && j >= sorted.length - 2) return right.intensity;
+    const span = right.wavenumber - left.wavenumber || 1;
+    const t = (wn - left.wavenumber) / span;
+    return left.intensity + (right.intensity - left.intensity) * t;
+  });
+}
+
+function zScore(values) {
+  const mean = values.reduce((acc, value) => acc + value, 0) / values.length;
+  const variance = values.reduce((acc, value) => acc + (value - mean) ** 2, 0) / values.length;
+  const sd = Math.sqrt(variance) || 1;
+  return values.map((value) => (value - mean) / sd);
+}
+
+function pearson(a, b) {
+  const n = Math.min(a.length, b.length);
+  if (!n) return 0;
+  let dot = 0;
+  let aa = 0;
+  let bb = 0;
+  for (let i = 0; i < n; i += 1) {
+    dot += a[i] * b[i];
+    aa += a[i] ** 2;
+    bb += b[i] ** 2;
+  }
+  return dot / (Math.sqrt(aa * bb) || 1);
+}
+
+function buildReferenceTemplates(data) {
+  const axis = data.spectra.map((row) => row.wavenumber);
+  const templates = {};
+  panelSubstances.forEach((abbr) => {
+    templates[abbr] = zScore(data.spectra.map((row) => Number(row[abbr]) || 0));
+  });
+  return { axis, templates };
+}
+
+function classifySpectrum(candidate, data) {
+  if (!candidate?.points?.length || !data?.spectra?.length) return null;
+  const { axis, templates } = buildReferenceTemplates(data);
+  const input = zScore(interpolateSpectrum(candidate.points, axis));
+  const rawScores = panelSubstances
+    .map((abbr) => {
+      const corr = pearson(input, templates[abbr]);
+      const normalized = (corr + 1) / 2;
+      return {
+        marker: abbr,
+        name: substanceMeta[abbr].name,
+        similarity: Number(normalized.toFixed(4)),
+        correlation: Number(corr.toFixed(4)),
+      };
+    })
+    .sort((a, b) => b.similarity - a.similarity);
+  const top = rawScores[0];
+  const second = rawScores[1];
+  if (!top) return null;
+  const sum = rawScores.reduce((acc, row) => acc + Math.max(row.similarity, 0.001), 0) || 1;
+  const confidence = Math.max(0, Math.min(0.995, top.similarity - Math.max(0, 0.12 - (top.similarity - (second?.similarity || 0))) * 0.25));
+  return {
+    marker: top.marker,
+    name: top.name,
+    confidence: Number(confidence.toFixed(4)),
+    margin: Number((top.similarity - (second?.similarity || 0)).toFixed(4)),
+    scores: rawScores,
+  };
+}
+
 function decorateImportResult(importResult) {
   const candidates = importResult.candidates.map((candidate) => {
     const markerHint = detectMarkerFromText(`${candidate.name} ${candidate.sourceMeta?.fileName || ""}`);
-    return { ...candidate, markerHint };
+    const spectralPrediction = classifySpectrum(candidate, state.rawData);
+    return {
+      ...candidate,
+      markerHint: markerHint || spectralPrediction?.marker || null,
+      textMarkerHint: markerHint,
+      spectralPrediction,
+    };
   });
   return { ...importResult, candidates };
 }
@@ -138,63 +221,38 @@ function inferSampleInterpretation(importResult, selectedIndex = state.selectedS
   }
 
   const selected = importResult.candidates[selectedIndex] || importResult.candidates[0];
-  const mapped = importResult.candidates.filter((candidate) => candidate.markerHint);
-  const uniqueMarkers = [...new Set(mapped.map((candidate) => candidate.markerHint))];
-  const duplicateMarkers = uniqueMarkers.filter((marker) => mapped.filter((candidate) => candidate.markerHint === marker).length > 1);
-  if (duplicateMarkers.length) {
-    return {
-      type: "mapping_conflict",
-      modeLabel: "通道冲突",
-      sampleTypeLabel: "通道映射待复核",
-      substances: [],
-      completePanel: false,
-      reportHint: `检测到重复通道：${duplicateMarkers.join("、")}，请调整通道映射后再生成结果。`,
-    };
-  }
-  const completePanel = panelSubstances.every((abbr) => uniqueMarkers.includes(abbr));
+  const prediction = selected?.spectralPrediction;
+  const confidence = prediction?.confidence || 0;
+  const margin = prediction?.margin || 0;
+  const reliable = selected?.markerHint && confidence >= 0.42 && margin >= 0.035;
 
-  if (completePanel || importResult.layout === "demo-single-spectrum") {
-    return {
-      type: "mapped_panel",
-      modeLabel: "完整面板分析",
-      sampleTypeLabel: "糖尿病标志物面板",
-      substances: panelSubstances,
-      completePanel: true,
-      reportHint: "已识别完整检测通道，可生成糖尿病标志物辅助检测结果。",
-    };
-  }
-
-  if (mapped.length > 1) {
-    const missing = panelSubstances.filter((abbr) => !uniqueMarkers.includes(abbr));
-    return {
-      type: "partial_panel",
-      modeLabel: "部分通道识别",
-      sampleTypeLabel: "部分标志物光谱",
-      substances: uniqueMarkers,
-      completePanel: false,
-      reportHint: `当前文件仅识别到部分检测通道，缺少 ${missing.join("、")}；结果按已识别通道显示。`,
-    };
-  }
-
-  if (selected?.markerHint) {
+  if (reliable) {
     const abbr = selected.markerHint;
     return {
-      type: "single_marker",
-      modeLabel: "单项通道分析",
-      sampleTypeLabel: `${substanceMeta[abbr].name}标准/单项光谱`,
+      type: "single_asfn",
+      modeLabel: "单光谱定性+定量",
+      sampleTypeLabel: `${substanceMeta[abbr].name}光谱`,
       substances: [abbr],
       completePanel: false,
-      reportHint: "当前输入仅支持单项分析，不生成完整糖尿病标志物报告。",
+      predictedMarker: abbr,
+      confidence,
+      margin,
+      reportHint: `ASFN适配层识别为${substanceMeta[abbr].name}，将仅输出该标志物的浓度预测结果。`,
     };
   }
 
   return {
     type: "unknown",
-    modeLabel: "通道待确认",
+    modeLabel: "识别置信度不足",
     sampleTypeLabel: "未知光谱",
     substances: [],
     completePanel: false,
-    reportHint: "未能确认检测通道，建议补充样本标签或手动确认通道后再生成结果。",
+    predictedMarker: prediction?.marker || null,
+    confidence,
+    margin,
+    reportHint: prediction?.marker
+      ? `当前光谱最接近${substanceMeta[prediction.marker].name}，但识别置信度不足，暂不输出浓度结果。`
+      : "未能确认检测对象，建议补充样本信息或重新采集光谱后再分析。",
   };
 }
 
@@ -206,22 +264,15 @@ function setInterpretation(importResult = state.importResult, selectedIndex = st
 
 function buildAsfnAnalysisRequest() {
   const interpretation = state.sampleInterpretation || setInterpretation();
-  const mappedCandidates = (state.importResult?.candidates || [])
-    .filter((candidate) => candidate.markerHint && interpretation.substances.includes(candidate.markerHint));
   const selected = state.uploadedSpectrum;
-  const channels = interpretation.completePanel
-    ? mappedCandidates.map((candidate) => ({
-        marker: candidate.markerHint,
-        name: candidate.name,
-        points: candidate.points.length,
-        range: candidate.range,
-      }))
-    : selected && interpretation.substances.length
-      ? [{
+  const channels = selected && interpretation.substances.length
+    ? [{
           marker: interpretation.substances[0],
           name: selected.name,
           points: selected.points.length,
           range: selected.range,
+          confidence: interpretation.confidence,
+          similarityRanking: selected.spectralPrediction?.scores || [],
         }]
       : [];
 
@@ -236,7 +287,7 @@ function buildAsfnAnalysisRequest() {
     qc: state.qc,
     inputPolicy: {
       requireConfirmedChannel: true,
-      completePanel: interpretation.completePanel,
+      completePanel: false,
       outputMarkers: interpretation.substances,
     },
   };
@@ -255,12 +306,13 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
     };
   }
 
-  const qualityFactor = Math.max(0.86, Math.min(1.06, qc.overall / 92));
-  const spectralFactor = Math.max(0.92, Math.min(1.08, 1 + (qc.signalSpan - 1.2) * 0.035));
+  const qualityFactor = Math.max(0.88, Math.min(1.05, qc.overall / 92));
+  const spectralFactor = Math.max(0.9, Math.min(1.1, 1 + (qc.signalSpan - 1.2) * 0.035));
   const sourceRows = baseData.substances.filter((substance) => allowed.has(substance.abbr));
   const predictions = sourceRows.map((substance, index) => {
-    const localShift = (index - (sourceRows.length - 1) / 2) * 0.018;
-    const predicted = Number((substance.indicator.predicted * qualityFactor * spectralFactor * (1 + localShift)).toFixed(3));
+    const classificationConfidence = request.channels.find((channel) => channel.marker === substance.abbr)?.confidence || 0;
+    const confidenceFactor = Math.max(0.94, Math.min(1.04, 0.98 + classificationConfidence * 0.04));
+    const predicted = Number((substance.indicator.predicted * qualityFactor * spectralFactor * confidenceFactor).toFixed(3));
     return {
       marker: substance.abbr,
       name: substance.name,
@@ -270,6 +322,7 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
       sd: Number((Math.max(substance.indicator.sd * (1.05 - qc.overall / 220), 0.01)).toFixed(3)),
       r2: substance.regression.r2,
       f1: substance.classification.f1,
+      classificationConfidence,
       nSpectra: request.channels.find((channel) => channel.marker === substance.abbr)?.points || state.uploadedSpectrum?.points.length || 0,
     };
   });
@@ -280,9 +333,7 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
     status: "completed",
     generatedAt: new Date().toISOString(),
     predictions,
-    message: request.inputPolicy.completePanel
-      ? "已完成糖尿病标志物面板分析。"
-      : "已完成单项标志物分析。",
+    message: "已完成单光谱定性识别与对应标志物浓度预测。",
   };
 }
 
@@ -328,6 +379,7 @@ function applyAnalysisResponse(baseData, spectrum, response) {
     copy.indicator.level = { 常规范围: "normal", 建议关注: "watch", 需复核: "review" }[copy.indicator.status];
     copy.regression.r2 = prediction.r2;
     copy.classification.f1 = prediction.f1;
+    copy.classification.confidence = prediction.classificationConfidence;
     return copy;
   });
 
@@ -416,10 +468,11 @@ function renderSpectrumSelection() {
   }
   const result = state.importResult;
   const interpretation = state.sampleInterpretation || setInterpretation(result);
+  const prediction = state.uploadedSpectrum?.spectralPrediction;
   const notes = [
     result.hasWavenumberAxis ? "已识别拉曼位移轴" : "未识别明确拉曼位移轴，按 400-1800 cm⁻¹ 默认网格处理",
     result.labelColumns.length ? `已剥离标签列：${result.labelColumns.join("、")}` : "未检测到独立标签列",
-    result.candidates.length > 1 ? "检测到多条候选光谱，请选择进入分析的光谱" : "检测到单条候选光谱，可直接进入分析",
+    result.candidates.length > 1 ? "检测到多条候选光谱，请选择其中一条进入单光谱分析" : "检测到单条候选光谱，可进行定性识别与对应定量",
     interpretation.reportHint,
   ];
   const markerOptions = (selected) => [
@@ -432,10 +485,10 @@ function renderSpectrumSelection() {
         <button class="spectrum-pick" data-spectrum-index="${index}" type="button">
           <strong>${candidate.name}</strong>
           <span>${candidate.points.length} 点 · ${Math.round(candidate.range[0])}-${Math.round(candidate.range[1])} cm⁻¹</span>
-          <em>${candidate.markerHint ? `${candidate.markerHint} · ${substanceMeta[candidate.markerHint].name}` : "通道待确认"}</em>
+          <em>${candidate.spectralPrediction ? `${candidate.spectralPrediction.marker} · ${candidate.spectralPrediction.name} · 置信度 ${pct(candidate.spectralPrediction.confidence)}` : "待识别"}</em>
         </button>
         <label>
-          <span>检测通道</span>
+          <span>人工复核</span>
           <select data-marker-index="${index}">
             ${markerOptions(candidate.markerHint)}
           </select>
@@ -444,9 +497,18 @@ function renderSpectrumSelection() {
     `)
     .join("");
   const mapping = result.candidates
-    .filter((candidate) => candidate.markerHint)
-    .map((candidate) => `${candidate.name} → ${candidate.markerHint}`)
+    .filter((candidate) => candidate.spectralPrediction)
+    .map((candidate) => `${candidate.name} → ${candidate.spectralPrediction.marker}`)
     .join("；");
+  const ranking = prediction?.scores?.slice(0, 6)
+    .map((score) => `
+      <div class="rank-row">
+        <span>${score.marker} · ${score.name}</span>
+        <strong>${pct(score.similarity)}</strong>
+        <i style="--value:${Math.max(5, Math.min(100, score.similarity * 100))}%"></i>
+      </div>
+    `)
+    .join("") || "";
   target.innerHTML = `
     <div class="selection-header">
       <div>
@@ -459,7 +521,17 @@ function renderSpectrumSelection() {
     <div class="sample-interpretation">
       <div><span>样本判断</span><strong>${interpretation.sampleTypeLabel}</strong></div>
       <div><span>分析模式</span><strong>${interpretation.modeLabel}</strong></div>
-      <div><span>通道映射</span><strong>${mapping || "未识别到明确通道"}</strong></div>
+      <div><span>模型识别</span><strong>${mapping || "识别置信度不足"}</strong></div>
+    </div>
+    <div class="classification-panel">
+      <div class="classification-head">
+        <div>
+          <p class="section-kicker">Qualitative recognition</p>
+          <h4>定性识别候选排序</h4>
+        </div>
+        <span>${prediction ? `Top-1 ${prediction.marker} · ${pct(prediction.confidence)}` : "等待光谱"}</span>
+      </div>
+      <div class="rank-list">${ranking || "<span>导入光谱后显示相似度排序。</span>"}</div>
     </div>
     <div class="spectrum-options">${cards}</div>
   `;
@@ -502,7 +574,9 @@ function renderAnalysisContract() {
       <div><span>任务编号</span><strong>${requestId}</strong></div>
       <div><span>分析模式</span><strong>${interpretation.modeLabel}</strong></div>
       <div><span>分析模块</span><strong>${state.analysisBackend}</strong></div>
-      <div><span>输出通道</span><strong class="marker-list">${markers}</strong></div>
+      <div><span>预测对象</span><strong class="marker-list">${markers}</strong></div>
+      <div><span>识别置信度</span><strong>${interpretation.confidence ? pct(interpretation.confidence) : "待确认"}</strong></div>
+      <div><span>候选间隔</span><strong>${interpretation.margin ? pct(interpretation.margin) : "待确认"}</strong></div>
     </div>
   `;
 }
@@ -582,16 +656,17 @@ function renderSummary(data) {
   const meanF1 = active.length
     ? active.reduce((acc, item) => acc + Number(item.classification.f1 || 0), 0) / active.length
     : null;
+  const confidence = state.sampleInterpretation?.confidence || null;
   const cards = [
-    [active.length ? "识别准确率" : "识别状态", active.length ? pct(summary.classificationAccuracy) : "待确认"],
+    [active.length ? "识别置信度" : "识别状态", active.length && confidence ? pct(confidence) : "待确认"],
     ["当前R²", meanR2 === null ? "待确认" : fmt(meanR2, 4)],
     ["当前F1", meanF1 === null ? "待确认" : pct(meanF1)],
-    ["需复核指标", `${summary.reviewCount} 项`],
+    ["输出对象", active.length ? `${active[0].abbr}` : "待确认"],
   ];
   el("#summary-cards").innerHTML = cards
     .map(([label, value]) => `<div class="summary-card"><span>${label}</span><strong>${value}</strong></div>`)
     .join("");
-  el("#overview-meta").textContent = `分析完成 · ${data.sample.analyzedAt}`;
+  el("#overview-meta").textContent = state.pipeline.analyzed ? `分析完成 · ${data.sample.analyzedAt}` : "等待单光谱分析";
 }
 
 function renderIndicators(data) {
@@ -623,6 +698,10 @@ function renderIndicators(data) {
           <div class="indicator-foot">
             <span>辅助区间 ${indicator.reference}</span>
             <span>n=${indicator.nSpectra}</span>
+          </div>
+          <div class="indicator-foot">
+            <span>识别置信度 ${substance.classification.confidence ? pct(substance.classification.confidence) : "--"}</span>
+            <span>R² ${fmt(substance.regression.r2, 4)}</span>
           </div>
         </article>
       `;
@@ -702,7 +781,7 @@ function renderShiftTags(selector, shifts) {
 
 function renderBands(data) {
   const interpretation = state.sampleInterpretation;
-  if (state.uploadedSpectrum && (!interpretation?.completePanel || !data.substances.length)) {
+  if (state.uploadedSpectrum && !data.substances.length) {
     el("#band-list").innerHTML = `
       <div class="band-item spectrum-state-card">
         <strong><span>当前输入光谱</span><span>${interpretation?.modeLabel || "待确认"}</span></strong>
@@ -711,7 +790,11 @@ function renderBands(data) {
     `;
     return;
   }
-  el("#band-list").innerHTML = data.keyBands
+  const activeMarkers = data.substances.map((item) => item.abbr);
+  const sourceBands = activeMarkers.length
+    ? data.keyBands.filter((band) => activeMarkers.includes(band.substance))
+    : data.keyBands;
+  el("#band-list").innerHTML = sourceBands
     .slice(0, 10)
     .map((band) => `
       <div class="band-item">
@@ -812,7 +895,7 @@ function renderResultTable(data) {
   if (!data.substances.length) {
     el("#result-table-body").innerHTML = `
       <tr>
-        <td colspan="7">未识别到明确检测通道，暂不生成标志物浓度结果。</td>
+        <td colspan="7">未达到可靠识别阈值，暂不生成标志物浓度结果。</td>
       </tr>
     `;
     return;
@@ -837,11 +920,12 @@ function renderResultTable(data) {
 
 function renderMetricBars(data) {
   const rows = data.substances.flatMap((substance) => [
+    [`${substance.abbr} 置信度`, substance.classification.confidence || 0],
     [`${substance.abbr} R²`, substance.regression.r2],
     [`${substance.abbr} F1`, substance.classification.f1],
   ]);
   if (!rows.length) {
-    el("#metric-bars").innerHTML = `<div class="empty-inline">检测通道确认后显示模型指标。</div>`;
+    el("#metric-bars").innerHTML = `<div class="empty-inline">完成单光谱识别后显示模型指标。</div>`;
     return;
   }
   el("#metric-bars").innerHTML = rows
@@ -874,13 +958,13 @@ function renderReport(data) {
     .join("") || `<div class="report-result"><span>检测通道</span><strong>待确认</strong></div>`;
   const reportTitle = interpretation.completePanel
     ? "糖尿病标志物 SERS 辅助检测报告"
-    : interpretation.type === "single_marker"
+    : interpretation.type === "single_asfn"
       ? `${substanceMeta[interpretation.substances[0]]?.name || "单项标志物"} SERS 辅助分析报告`
       : "SERS 光谱通道确认报告";
   const reportScope = interpretation.completePanel
     ? "本报告覆盖糖尿病相关标志物面板，用于科研场景下的多指标辅助分析。"
-    : interpretation.type === "single_marker"
-      ? `本报告仅覆盖 ${substanceMeta[interpretation.substances[0]]?.name || "当前标志物"} 单项通道，不代表完整糖尿病标志物面板。`
+    : interpretation.type === "single_asfn"
+      ? `本报告基于单条输入光谱完成定性识别，并仅输出 ${substanceMeta[interpretation.substances[0]]?.name || "当前标志物"} 的对应浓度预测结果。`
       : "当前光谱尚未确认检测通道，报告仅记录导入识别和质量检查结果。";
   const statusText = response?.status === "completed"
     ? "分析完成"
@@ -1270,21 +1354,17 @@ function parseLegacySingleSpectrum(text, fileName = "uploaded-spectrum") {
 }
 
 function createDemoSpectrum(data) {
+  const demoMarker = "Trp";
   const points = data.spectra.map((row) => {
-    const intensity =
-      row.Trp * 0.18 +
-      row.Phe * 0.18 +
-      row.Glc * 0.22 +
-      row.CRP * 0.16 +
-      row.RSTN * 0.13 +
-      row.APN * 0.13;
+    const localRipple = 0.012 * Math.sin(row.wavenumber / 47) + 0.006 * Math.cos(row.wavenumber / 89);
+    const intensity = row[demoMarker] * 1.02 + localRipple;
     return {
       wavenumber: row.wavenumber,
-      intensity,
+      intensity: Number(intensity.toFixed(6)),
     };
   });
   return {
-    name: "内置示例光谱",
+    name: "内置示例光谱_Trp",
     sampleId: `SERS-DEMO-${Date.now().toString().slice(-6)}`,
     points,
     range: [points[0].wavenumber, points[points.length - 1].wavenumber],
