@@ -10,7 +10,8 @@ const state = {
   analysisSubstances: null,
   analysisRequest: null,
   analysisResponse: null,
-  analysisBackend: "ASFN单光谱分析适配层",
+  analysisBackend: "本地ASFN-v2推理服务",
+  apiEndpoint: "http://127.0.0.1:8787/api/analyze-spectrum",
   sampleEdits: {
     note: "",
     operator: "未填写",
@@ -342,6 +343,69 @@ function createAsfnAnalysisResponse(request, baseData, qc) {
   };
 }
 
+function mapApiResponseToAsfnResponse(apiResult, request, baseData) {
+  const marker = apiResult?.top1?.marker;
+  const source = baseData.substances.find((substance) => substance.abbr === marker);
+  if (!marker || !source) {
+    return {
+      requestId: request.requestId,
+      backend: "本地ASFN-v2推理服务",
+      status: "channel_required",
+      generatedAt: new Date().toISOString(),
+      predictions: [],
+      message: "ASFN服务未返回可靠标志物结果。",
+    };
+  }
+  const predicted = Number(apiResult.top1.predicted_concentration.toFixed(3));
+  return {
+    requestId: request.requestId,
+    backend: "本地ASFN-v2推理服务",
+    status: "completed",
+    generatedAt: new Date().toISOString(),
+    predictions: [{
+      marker,
+      name: source.name,
+      predicted,
+      unit: source.indicator.unit,
+      reference: source.indicator.reference,
+      sd: source.indicator.sd,
+      r2: source.regression.r2,
+      f1: source.classification.f1,
+      classificationConfidence: apiResult.top1.probability,
+      nSpectra: state.uploadedSpectrum?.points.length || apiResult.qc?.n_points || 0,
+    }],
+    message: `本地ASFN-v2服务完成定性识别，输出 ${source.name} 的对应浓度预测。`,
+    evidence: {
+      basis: "本地ASFN-v2权重直接推理",
+      onlineModelWeights: true,
+      note: apiResult.interpretation_boundary || "单条光谱输出需结合重复采样和质控结果复核。",
+      ranking: apiResult.ranking || [],
+      qc: apiResult.qc || null,
+      raw: apiResult,
+    },
+  };
+}
+
+async function requestAsfnBackend(request) {
+  if (!state.uploadedSpectrum?.points?.length) throw new Error("未导入可分析光谱。");
+  const payload = {
+    request_id: request.requestId,
+    sample_name: state.uploadedSpectrum.name,
+    file_name: state.uploadedSpectrum.sourceMeta?.fileName || state.uploadedSpectrum.name,
+    points: state.uploadedSpectrum.points,
+  };
+  const response = await fetch(state.apiEndpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(`ASFN服务请求失败：${detail}`);
+  }
+  return response.json();
+}
+
 function updateSampleFromSpectrum(data, spectrum) {
   if (!spectrum) return;
   const interpretation = state.sampleInterpretation || setInterpretation();
@@ -573,6 +637,7 @@ function renderAnalysisContract() {
     : `<span>待确认</span>`;
   const requestId = request?.requestId || "待生成";
   const responseStatus = response?.status === "completed" ? "已完成" : response?.status === "channel_required" ? "通道待确认" : "等待分析";
+  const modelWeightState = response?.evidence?.onlineModelWeights ? "已接入本地权重" : "网页适配层";
   target.innerHTML = `
     <div class="contract-header">
       <div>
@@ -585,13 +650,14 @@ function renderAnalysisContract() {
       <div><span>任务编号</span><strong>${requestId}</strong></div>
       <div><span>分析模式</span><strong>${interpretation.modeLabel}</strong></div>
       <div><span>分析模块</span><strong>${state.analysisBackend}</strong></div>
+      <div><span>模型状态</span><strong>${modelWeightState}</strong></div>
       <div><span>预测对象</span><strong class="marker-list">${markers}</strong></div>
       <div><span>识别置信度</span><strong>${interpretation.confidence ? pct(interpretation.confidence) : "待确认"}</strong></div>
       <div><span>候选间隔</span><strong>${interpretation.margin ? pct(interpretation.margin) : "待确认"}</strong></div>
     </div>
     <div class="method-note compact-note">
       <strong>模型接入状态</strong>
-      <span>网页端展示为ASFN结果适配层，未加载.pth权重；定量结果来自前期ASFN平均浓度预测结果并按当前光谱质控状态修正。</span>
+      <span>${response?.evidence?.note || "本地服务可用时调用ASFN-v2权重直接推理；服务不可用时保留网页端适配层用于界面演示。"}</span>
     </div>
   `;
 }
@@ -1047,7 +1113,7 @@ function renderReport(data) {
       <div class="report-grid-list">${resultCards}</div>
       <div class="report-section">
         <strong>分析依据</strong>
-        <p>当前报告依据前期ASFN模型结果、糖尿病标志物平均SERS模板、输入光谱相似性排序和自动质控评分生成。网页端用于科研辅助展示和复核提示，尚未部署完整深度学习权重文件。</p>
+        <p>${response?.evidence?.onlineModelWeights ? "当前报告由本地ASFN-v2模型权重直接推理生成，包括六类定性识别与对应标志物浓度预测；单条光谱输出需结合重复采样和质控结果复核。" : "当前报告依据前期ASFN模型结果、糖尿病标志物平均SERS模板、输入光谱相似性排序和自动质控评分生成。网页端用于科研辅助展示和复核提示。"}</p>
       </div>
       <div class="report-summary">
         <strong>综合提示：</strong>
@@ -1470,7 +1536,7 @@ function setUploadMessage(message, type = "normal") {
   node.className = type === "error" ? "upload-error" : "";
 }
 
-function runAnalysis() {
+async function runAnalysis() {
   if (!state.uploadedSpectrum) {
     state.uploadedSpectrum = createDemoSpectrum(state.data);
     state.importResult = decorateImportResult({
@@ -1489,7 +1555,34 @@ function runAnalysis() {
   state.pipeline.imported = true;
   state.pipeline.qc = state.qc.overall >= 70;
   state.analysisRequest = buildAsfnAnalysisRequest();
-  state.analysisResponse = createAsfnAnalysisResponse(state.analysisRequest, state.rawData, state.qc);
+  setUploadMessage("正在调用本地ASFN-v2推理服务，请稍候。");
+  try {
+    const apiResult = await requestAsfnBackend(state.analysisRequest);
+    state.analysisResponse = mapApiResponseToAsfnResponse(apiResult, state.analysisRequest, state.rawData);
+    if (state.analysisResponse.predictions.length) {
+      const apiMarker = state.analysisResponse.predictions[0].marker;
+      state.sampleInterpretation = {
+        type: "single_asfn",
+        modeLabel: "单光谱定性+定量",
+        sampleTypeLabel: `${substanceMeta[apiMarker]?.name || apiMarker}光谱`,
+        substances: [apiMarker],
+        completePanel: false,
+        predictedMarker: apiMarker,
+        confidence: state.analysisResponse.predictions[0].classificationConfidence,
+        margin: null,
+        reportHint: `ASFN模型识别为${substanceMeta[apiMarker]?.name || apiMarker}，将仅输出该标志物的浓度预测结果。`,
+      };
+      state.analysisSubstances = [apiMarker];
+    }
+  } catch (error) {
+    console.warn(error);
+    state.analysisResponse = createAsfnAnalysisResponse(state.analysisRequest, state.rawData, state.qc);
+    state.analysisResponse.evidence = {
+      ...(state.analysisResponse.evidence || {}),
+      onlineModelWeights: false,
+      note: `本地ASFN服务暂不可用，已回退至网页端适配层：${error.message}`,
+    };
+  }
   state.pipeline.analyzed = state.pipeline.qc && state.analysisResponse.status === "completed" && state.sampleInterpretation.type !== "mapping_conflict";
   state.pipeline.reported = state.pipeline.analyzed;
   state.reportStatus = state.pipeline.analyzed ? "待复核" : "质控复核";
