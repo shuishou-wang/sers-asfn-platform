@@ -10,8 +10,8 @@ const state = {
   analysisSubstances: null,
   analysisRequest: null,
   analysisResponse: null,
-  analysisBackend: "本地ASFN-v2推理服务",
-  apiEndpoint: "http://127.0.0.1:8787/api/analyze-spectrum",
+  analysisBackend: "公网ASFN-v2推理服务",
+  apiEndpoint: "https://shui123456-sers-asfn-backend.hf.space/api/analyze-spectrum",
   sampleEdits: {
     note: "",
     operator: "未填写",
