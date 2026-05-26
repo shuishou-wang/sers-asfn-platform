@@ -42,8 +42,8 @@
 
         <div class="sidebar-footer">
           <div class="mini-label">System status</div>
-          <div class="status-dot-row"><span class="dot ok"></span><span>分析服务在线</span></div>
-          <div class="status-dot-row"><span class="dot watch"></span><span>报告复核待处理</span></div>
+          <div class="status-dot-row"><span class="dot ok"></span><span>平台已加载</span></div>
+          <div class="status-dot-row"><span class="dot watch"></span><span>模型服务待调用</span></div>
         </div>
       </aside>
 
@@ -199,10 +199,11 @@
                   <p class="section-kicker">Quantitative review</p>
                   <h3>定性与定量结果判读</h3>
                 </div>
-                <span class="panel-meta">状态基于当前平台辅助区间</span>
-              </div>
-              <div class="table-wrap">
-                <table class="result-table">
+            <span class="panel-meta">单光谱识别后输出对应浓度</span>
+          </div>
+          <div id="primary-result-card"></div>
+          <div class="table-wrap result-table-wrap">
+            <table class="result-table">
                   <thead>
                     <tr>
                       <th>指标</th>
@@ -223,11 +224,12 @@
               <div class="panel-heading">
                 <div>
                   <p class="section-kicker">Model summary</p>
-                  <h3>分析性能摘要</h3>
-                </div>
-              </div>
-              <div id="metric-bars" class="metric-bars"></div>
-            </aside>
+              <h3>分析性能摘要</h3>
+            </div>
+          </div>
+          <div id="confidence-card"></div>
+          <div id="metric-bars" class="metric-bars"></div>
+        </aside>
           </div>
         </section>
 
@@ -297,7 +299,7 @@
               </div>
               <div class="note-card">
                 <strong>使用边界</strong>
-                <p>平台结果用于科研场景下的辅助分析和复核提示，不替代临床诊断结论。</p>
+                <p>平台结果用于科研场景下的辅助分析和复核提示，结果解释应结合样本背景、实验条件和重复检测结果。</p>
               </div>
             </aside>
           </div>
