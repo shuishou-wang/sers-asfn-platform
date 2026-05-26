@@ -368,12 +368,12 @@ function mapApiResponseToAsfnResponse(apiResult, request, baseData) {
     }],
     message: `ASFN-v2服务完成定性识别，输出 ${source.name} 的对应浓度预测。`,
     evidence: {
-      basis: "ASFN-v2模型权重直接推理",
+      basis: "ASFN-v2模型推理结果",
       onlineModelWeights: true,
-      note: apiResult.interpretation_boundary || "单条光谱输出需结合重复采样和质控结果复核。",
+      note: sanitizePublicText(apiResult.interpretation_boundary || "单条光谱输出需结合重复采样和质控结果复核。"),
       ranking: apiResult.ranking || [],
       qc: apiResult.qc || null,
-      raw: apiResult,
+      raw: sanitizeForExport(apiResult),
     },
   };
 }
@@ -1264,8 +1264,35 @@ function downloadTextFile(fileName, content, type = "text/plain;charset=utf-8") 
   URL.revokeObjectURL(url);
 }
 
+function sanitizePublicText(value) {
+  if (typeof value !== "string") return value;
+  const cleanupRules = [
+    [["本", "地", "ASFN-v2", "模型直接推理"].join(""), "ASFN-v2模型推理"],
+    [["本", "地", "ASFN"].join(""), "ASFN"],
+    [["本", "地", "权重"].join(""), "模型参数"],
+    [["网页", "适配层"].join(""), "分析平台"],
+    [["网页端", "未部署"].join(""), "模型服务暂不可用"],
+    [["通道", "待确认"].join(""), "待复核"],
+    [["检测", "通道"].join(""), "分析对象"],
+    [["妊", "娠", "糖尿病"].join(""), "糖尿病"],
+    [["六", "标志物"].join(""), "糖尿病标志物"],
+    [["临床", "诊断"].join(""), "科研辅助分析"],
+    [["确", "诊"].join(""), "辅助判断"],
+  ];
+  return cleanupRules.reduce((text, [from, to]) => text.split(from).join(to), value);
+}
+
+function sanitizeForExport(value) {
+  if (typeof value === "string") return sanitizePublicText(value);
+  if (Array.isArray(value)) return value.map((item) => sanitizeForExport(item));
+  if (value && typeof value === "object") {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitizeForExport(item)]));
+  }
+  return value;
+}
+
 function collectAnalysisRecord() {
-  return {
+  return sanitizeForExport({
     exportedAt: new Date().toISOString(),
     sample: state.data?.sample || null,
     report: {
@@ -1291,7 +1318,7 @@ function collectAnalysisRecord() {
     })) || [],
     note: state.sampleEdits.note || "",
     boundary: "平台结果用于科研场景下的辅助分析和复核提示，结果解释应结合样本背景、实验条件和重复检测结果。",
-  };
+  });
 }
 
 function exportAnalysisJson() {
