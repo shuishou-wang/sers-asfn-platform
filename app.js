@@ -318,51 +318,18 @@ function buildAsfnAnalysisRequest() {
   };
 }
 
-function createAsfnAnalysisResponse(request, baseData, qc) {
-  const allowed = new Set(request.inputPolicy.outputMarkers || []);
-  if (!request.channels.length || !allowed.size) {
-    return {
-      requestId: request.requestId,
-      backend: request.backend,
-      status: "channel_required",
-      generatedAt: new Date().toISOString(),
-      predictions: [],
-      message: "未达到可靠识别阈值，未生成标志物浓度结果。",
-    };
-  }
-
-  const qualityFactor = Math.max(0.88, Math.min(1.05, qc.overall / 92));
-  const spectralFactor = Math.max(0.9, Math.min(1.1, 1 + (qc.signalSpan - 1.2) * 0.035));
-  const sourceRows = baseData.substances.filter((substance) => allowed.has(substance.abbr));
-  const predictions = sourceRows.map((substance, index) => {
-    const classificationConfidence = request.channels.find((channel) => channel.marker === substance.abbr)?.confidence || 0;
-    const confidenceFactor = Math.max(0.94, Math.min(1.04, 0.98 + classificationConfidence * 0.04));
-    const predicted = Number((substance.indicator.predicted * qualityFactor * spectralFactor * confidenceFactor).toFixed(3));
-    return {
-      marker: substance.abbr,
-      name: substance.name,
-      predicted,
-      unit: substance.indicator.unit,
-      reference: substance.indicator.reference,
-      sd: Number((Math.max(substance.indicator.sd * (1.05 - qc.overall / 220), 0.01)).toFixed(3)),
-      r2: substance.regression.r2,
-      f1: substance.classification.f1,
-      classificationConfidence,
-      nSpectra: request.channels.find((channel) => channel.marker === substance.abbr)?.points || state.uploadedSpectrum?.points.length || 0,
-    };
-  });
-
+function createAsfnUnavailableResponse(request, error) {
   return {
-    requestId: request.requestId,
-    backend: request.backend,
-    status: "completed",
+    requestId: request?.requestId || createRequestId(),
+    backend: state.analysisBackend,
+    status: "service_unavailable",
     generatedAt: new Date().toISOString(),
-    predictions,
-    message: "已完成单光谱定性识别与对应标志物浓度预测。",
+    predictions: [],
+    message: "ASFN-v2推理服务暂不可用，当前未生成定性识别或浓度预测结果。",
     evidence: {
-      basis: "前期ASFN模型结果、糖尿病标志物平均SERS模板和当前光谱质控评分",
+      basis: "ASFN-v2推理服务",
       onlineModelWeights: false,
-      note: "当前网页端未部署深度学习权重文件，结果用于科研辅助展示和复核。",
+      note: `模型服务连接失败，建议稍后重试或使用离线复核流程。${error?.message ? `错误信息：${error.message}` : ""}`,
     },
   };
 }
@@ -373,7 +340,7 @@ function mapApiResponseToAsfnResponse(apiResult, request, baseData) {
   if (!marker || !source) {
     return {
       requestId: request.requestId,
-      backend: "本地ASFN-v2推理服务",
+      backend: "ASFN-v2推理服务",
       status: "channel_required",
       generatedAt: new Date().toISOString(),
       predictions: [],
@@ -383,7 +350,7 @@ function mapApiResponseToAsfnResponse(apiResult, request, baseData) {
   const predicted = Number(apiResult.top1.predicted_concentration.toFixed(3));
   return {
     requestId: request.requestId,
-    backend: "本地ASFN-v2推理服务",
+    backend: "ASFN-v2推理服务",
     status: "completed",
     generatedAt: new Date().toISOString(),
     predictions: [{
@@ -398,9 +365,9 @@ function mapApiResponseToAsfnResponse(apiResult, request, baseData) {
       classificationConfidence: apiResult.top1.probability,
       nSpectra: state.uploadedSpectrum?.points.length || apiResult.qc?.n_points || 0,
     }],
-    message: `本地ASFN-v2服务完成定性识别，输出 ${source.name} 的对应浓度预测。`,
+    message: `ASFN-v2服务完成定性识别，输出 ${source.name} 的对应浓度预测。`,
     evidence: {
-      basis: "本地ASFN-v2权重直接推理",
+      basis: "ASFN-v2模型权重直接推理",
       onlineModelWeights: true,
       note: apiResult.interpretation_boundary || "单条光谱输出需结合重复采样和质控结果复核。",
       ranking: apiResult.ranking || [],
@@ -660,8 +627,14 @@ function renderAnalysisContract() {
     ? interpretation.substances.map((abbr) => `<span>${abbr}</span>`).join("")
     : `<span>待确认</span>`;
   const requestId = request?.requestId || "待生成";
-  const responseStatus = response?.status === "completed" ? "已完成" : response?.status === "channel_required" ? "通道待确认" : "等待分析";
-  const modelWeightState = response?.evidence?.onlineModelWeights ? "已接入本地权重" : "网页适配层";
+  const responseStatus = response?.status === "completed"
+    ? "已完成"
+    : response?.status === "service_unavailable"
+      ? "服务暂不可用"
+      : response?.status === "channel_required"
+        ? "结果待复核"
+        : "等待分析";
+  const modelWeightState = response?.evidence?.onlineModelWeights ? "模型已接入" : "等待模型响应";
   target.innerHTML = `
     <div class="contract-header">
       <div>
@@ -681,7 +654,7 @@ function renderAnalysisContract() {
     </div>
     <div class="method-note compact-note">
       <strong>模型接入状态</strong>
-      <span>${response?.evidence?.note || "平台优先调用ASFN-v2推理服务；当服务暂不可用时，保留辅助分析流程用于界面复核。"}</span>
+      <span>${response?.evidence?.note || "平台优先调用ASFN-v2推理服务，服务未返回前不生成定性识别或浓度预测结果。"}</span>
     </div>
   `;
 }
@@ -695,7 +668,7 @@ function addAnalysisHistory() {
     id: response.requestId || createRequestId(),
     sampleId: sample.id,
     mode: interpretation.modeLabel || "等待光谱",
-    status: response.status === "completed" ? "分析完成" : "通道待确认",
+    status: response.status === "completed" ? "分析完成" : response.status === "service_unavailable" ? "服务暂不可用" : "结果待复核",
     time: sample.analyzedAt || new Date().toLocaleString("zh-CN", { hour12: false }),
     markers: interpretation.substances?.length ? interpretation.substances.join("、") : "待确认",
   };
@@ -1174,21 +1147,28 @@ function renderReport(data) {
         <strong>${fmt(substance.indicator.predicted, 3)} ${substance.indicator.unit}</strong>
       </div>
     `)
-    .join("") || `<div class="report-result"><span>检测通道</span><strong>待确认</strong></div>`;
+    .join("") || `<div class="report-result"><span>分析结果</span><strong>待生成</strong></div>`;
   const reportTitle = interpretation.type === "single_asfn"
       ? `${substanceMeta[interpretation.substances[0]]?.name || "单项标志物"} SERS 辅助分析报告`
       : "SERS 光谱辅助分析报告";
   const reportScope = interpretation.type === "single_asfn"
       ? `本报告基于单条输入光谱完成定性识别，并仅输出 ${substanceMeta[interpretation.substances[0]]?.name || "当前标志物"} 的对应浓度预测结果。`
-      : "当前光谱尚未确认检测通道，报告仅记录导入识别和质量检查结果。";
+      : "当前光谱尚未形成可复核的模型推理结果，报告仅记录导入识别和质量检查结果。";
   const statusText = response?.status === "completed"
     ? "分析完成"
+    : response?.status === "service_unavailable"
+      ? "服务暂不可用"
     : response?.status === "channel_required"
-      ? "通道待确认"
+      ? "结果待复核"
       : "等待分析";
   const summaryText = data.substances.length
     ? `${reviewItems.length ? `${reviewItems.join("、")}的检测结果提示需复核。` : "当前检测指标未触发复核提示。"}${normalItems.length ? `${normalItems.join("、")}处于平台辅助区间内。` : ""}`
     : `${interpretation.reportHint} 暂不生成标志物定量结果。`;
+  const evidenceText = response?.evidence?.onlineModelWeights
+    ? "当前报告由ASFN-v2模型推理生成，包括糖尿病标志物定性识别与对应浓度预测；单条光谱输出需结合重复采样和质控结果复核。"
+    : response?.status === "service_unavailable"
+      ? "ASFN-v2推理服务暂不可用，当前报告仅记录光谱导入、自动质控和服务状态，未生成定性识别或浓度预测结果。"
+      : "当前尚未形成可复核的模型推理结果，报告仅记录光谱导入识别和质量检查结果。";
   const noteMarkup = sample.note
     ? `<div class="report-section report-note"><strong>复核备注</strong><p>${escapeHtml(sample.note)}</p></div>`
     : "";
@@ -1221,7 +1201,7 @@ function renderReport(data) {
       <div class="report-grid-list">${resultCards}</div>
       <div class="report-section">
         <strong>分析依据</strong>
-        <p>${response?.evidence?.onlineModelWeights ? "当前报告由ASFN-v2模型推理生成，包括糖尿病标志物定性识别与对应浓度预测；单条光谱输出需结合重复采样和质控结果复核。" : "当前报告依据ASFN分析结果、糖尿病标志物平均SERS模板、输入光谱相似性排序和自动质控评分生成，用于科研辅助分析和复核提示。"}</p>
+        <p>${evidenceText}</p>
       </div>
       <div class="report-summary">
         <strong>综合提示：</strong>
@@ -1659,7 +1639,7 @@ async function runAnalysis() {
   state.pipeline.imported = true;
   state.pipeline.qc = state.qc.overall >= 70;
   state.analysisRequest = buildAsfnAnalysisRequest();
-  setUploadMessage("正在调用本地ASFN-v2推理服务，请稍候。");
+  setUploadMessage("正在调用ASFN-v2推理服务，请稍候。");
   try {
     const apiResult = await requestAsfnBackend(state.analysisRequest);
     state.analysisResponse = mapApiResponseToAsfnResponse(apiResult, state.analysisRequest, state.rawData);
@@ -1680,12 +1660,15 @@ async function runAnalysis() {
     }
   } catch (error) {
     console.warn(error);
-    state.analysisResponse = createAsfnAnalysisResponse(state.analysisRequest, state.rawData, state.qc);
-    state.analysisResponse.evidence = {
-      ...(state.analysisResponse.evidence || {}),
-      onlineModelWeights: false,
-      note: `ASFN推理服务暂不可用，已保留辅助分析流程：${error.message}`,
+    state.analysisResponse = createAsfnUnavailableResponse(state.analysisRequest, error);
+    state.sampleInterpretation = {
+      ...(state.sampleInterpretation || {}),
+      type: "service_unavailable",
+      substances: [],
+      completePanel: false,
+      reportHint: "ASFN-v2推理服务暂不可用，当前未生成定性识别或浓度预测结果。",
     };
+    state.analysisSubstances = [];
   }
   state.pipeline.analyzed = state.pipeline.qc && state.analysisResponse.status === "completed" && state.sampleInterpretation.type !== "mapping_conflict";
   state.pipeline.reported = state.pipeline.analyzed;
