@@ -12,6 +12,7 @@ const state = {
   analysisResponse: null,
   analysisBackend: "公网ASFN-v2推理服务",
   apiEndpoint: "https://shui123456-sers-asfn-backend.hf.space/api/analyze-spectrum",
+  activeFileImportKey: null,
   sampleEdits: {
     note: "",
     operator: "未填写",
@@ -1535,6 +1536,30 @@ function importSingleSpectrum(importResult) {
   switchView("spectrum");
 }
 
+async function handleSpectrumFile(file) {
+  if (!file) return;
+  const importKey = `${file.name}:${file.size}:${file.lastModified}`;
+  if (state.activeFileImportKey === importKey) return;
+  state.activeFileImportKey = importKey;
+  try {
+    setUploadMessage("正在读取并解析光谱文件，请稍候。");
+    const text = await file.text();
+    importSingleSpectrum(parseSpectrumText(text, file.name));
+  } catch (error) {
+    state.importError = error.message;
+    state.importResult = null;
+    state.uploadedSpectrum = null;
+    state.qc = null;
+    resetAnalysisState();
+    setUploadMessage(error.message, "error");
+    renderAll();
+  } finally {
+    if (state.activeFileImportKey === importKey) state.activeFileImportKey = null;
+    const input = el("#spectrum-file");
+    if (input) input.value = "";
+  }
+}
+
 function parseLegacySingleSpectrum(text, fileName = "uploaded-spectrum") {
   const rows = text
     .split(/\r?\n/)
@@ -1734,23 +1759,14 @@ function bindEvents() {
 
   el("#choose-file").addEventListener("click", () => el("#spectrum-file").click());
 
+  el("#spectrum-file").addEventListener("input", async (event) => {
+    const file = event.target.files?.[0];
+    await handleSpectrumFile(file);
+  });
+
   el("#spectrum-file").addEventListener("change", async (event) => {
     const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      const text = await file.text();
-      importSingleSpectrum(parseSpectrumText(text, file.name));
-    } catch (error) {
-      state.importError = error.message;
-      state.importResult = null;
-      state.uploadedSpectrum = null;
-      state.qc = null;
-      resetAnalysisState();
-      setUploadMessage(error.message, "error");
-      renderAll();
-    } finally {
-      event.target.value = "";
-    }
+    await handleSpectrumFile(file);
   });
 
   el("#demo-spectrum").addEventListener("click", () => {
