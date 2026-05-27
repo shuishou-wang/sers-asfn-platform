@@ -54,8 +54,8 @@
             <h2 id="top-title">加载检测数据中</h2>
           </div>
           <div class="topbar-actions">
-            <button class="ghost-button" id="review-button" type="button">进入复核</button>
-            <button class="primary-button" id="report-button" type="button">生成报告</button>
+            <button class="ghost-button" id="review-button" type="button" disabled aria-disabled="true">进入复核</button>
+            <button class="primary-button" id="report-button" type="button" disabled aria-disabled="true">生成报告</button>
           </div>
         </header>
 
@@ -103,16 +103,16 @@
               </div>
               <div class="upload-module">
                 <div class="upload-zone" id="upload-zone">
-                  <input id="spectrum-file" class="file-input" type="file" accept=".csv,.txt,.tsv" />
+                  <input id="spectrum-file" class="file-input" type="file" accept=".csv,.txt,.tsv" aria-label="选择待分析光谱文件" />
                   <div>
                     <p class="section-kicker">Spectrum import</p>
                     <h4>单条光谱导入与ASFN分析</h4>
                     <span id="upload-message">支持 CSV、TXT 或 TSV 光谱文件；系统将先识别标志物类别，再输出对应浓度预测。</span>
                   </div>
                   <div class="upload-actions">
-                    <button class="ghost-button compact" id="choose-file" type="button">选择光谱文件</button>
-                    <button class="ghost-button compact" id="demo-spectrum" type="button">使用示例光谱</button>
-                    <button class="primary-button compact" id="run-analysis" type="button">开始分析</button>
+                    <button class="ghost-button compact" id="choose-file" type="button" aria-label="选择光谱文件">选择光谱文件</button>
+                    <button class="ghost-button compact" id="demo-spectrum" type="button" aria-label="载入示例光谱">使用示例光谱</button>
+                    <button class="primary-button compact" id="run-analysis" type="button" aria-label="开始ASFN分析">开始分析</button>
                   </div>
                 </div>
                 <div class="pipeline-steps" id="pipeline-steps"></div>
@@ -161,9 +161,9 @@
                   <h3>输入光谱分析</h3>
                 </div>
                 <div class="chart-tools">
-                  <button class="primary-button compact" id="run-analysis-spectrum" type="button">开始ASFN分析</button>
-                  <button class="tool-chip active" data-spectrum-mode="stacked" type="button">叠加谱</button>
-                  <button class="tool-chip" data-spectrum-mode="focus" type="button">重点谱段</button>
+                  <button class="primary-button compact" id="run-analysis-spectrum" type="button" aria-label="开始ASFN分析">开始ASFN分析</button>
+                  <button class="tool-chip active" data-spectrum-mode="stacked" type="button" aria-label="查看完整叠加光谱">叠加谱</button>
+                  <button class="tool-chip" data-spectrum-mode="focus" type="button" aria-label="查看重点谱段">重点谱段</button>
                 </div>
               </div>
               <div class="chart-card">
@@ -264,31 +264,31 @@
                 <strong>样本信息</strong>
                 <label>
                   <span>样本编号</span>
-                  <input id="sample-id-input" type="text" />
+                  <input id="sample-id-input" type="text" aria-label="样本编号" />
                 </label>
                 <label>
                   <span>检测批次</span>
-                  <input id="sample-batch-input" type="text" />
+                  <input id="sample-batch-input" type="text" aria-label="检测批次" />
                 </label>
                 <label>
                   <span>样本类型</span>
-                  <input id="sample-type-input" type="text" />
+                  <input id="sample-type-input" type="text" aria-label="样本类型" />
                 </label>
                 <label>
                   <span>报告编号</span>
-                  <input id="report-id-input" type="text" />
+                  <input id="report-id-input" type="text" aria-label="报告编号" />
                 </label>
                 <label>
                   <span>检测人员</span>
-                  <input id="operator-input" type="text" />
+                  <input id="operator-input" type="text" aria-label="检测人员" />
                 </label>
                 <label>
                   <span>复核人员</span>
-                  <input id="reviewer-input" type="text" />
+                  <input id="reviewer-input" type="text" aria-label="复核人员" />
                 </label>
                 <label>
                   <span>复核备注</span>
-                  <textarea id="sample-note-input" rows="3"></textarea>
+                  <textarea id="sample-note-input" rows="3" aria-label="复核备注"></textarea>
                 </label>
                 <button class="ghost-button compact" id="save-sample-info" type="button">保存样本信息</button>
               </div>

@@ -475,6 +475,20 @@ function renderSampleStrip(data) {
   el("#report-state").textContent = state.reportStatus;
 }
 
+function updateActionButtons() {
+  const canReview = Boolean(state.pipeline.analyzed);
+  [
+    ["#review-button", canReview],
+    ["#report-button", canReview],
+  ].forEach(([selector, enabled]) => {
+    const button = el(selector);
+    if (!button) return;
+    button.disabled = !enabled;
+    button.setAttribute("aria-disabled", String(!enabled));
+    button.title = enabled ? "" : "完成光谱导入、质控和ASFN分析后可用";
+  });
+}
+
 function renderPipeline() {
   el("#pipeline-steps").innerHTML = pipelineLabels
     .map(([key, label], index) => {
@@ -1006,6 +1020,8 @@ function renderSpectrumChart(data) {
     markup += `
       <text class="chart-label" x="${viewBox.left + 12}" y="${viewBox.top + 24}" fill="#193247">${interpretation?.sampleTypeLabel || "上传光谱"}</text>
       <text class="chart-tick" x="${viewBox.left + 12}" y="${viewBox.top + 48}" fill="#6d7a86">${interpretation?.reportHint || ""}</text>
+      <rect x="${viewBox.w - viewBox.right - 272}" y="${viewBox.h - viewBox.bottom - 34}" width="268" height="22" rx="11" fill="#f7fbfc" stroke="#d6e3e8"/>
+      <text class="chart-note" x="${viewBox.w - viewBox.right - 138}" y="${viewBox.h - viewBox.bottom - 19}" text-anchor="middle">网页预览曲线已归一化，仅用于质控复核</text>
     `;
   }
   markup += important
@@ -1250,6 +1266,7 @@ function renderAll() {
   renderSampleEditor(data);
   renderWorkflowList();
   renderHistory();
+  updateActionButtons();
 }
 
 function downloadTextFile(fileName, content, type = "text/plain;charset=utf-8") {
@@ -1759,6 +1776,7 @@ function bindEvents() {
   });
 
   el("#review-button").addEventListener("click", () => {
+    if (!state.pipeline.analyzed) return;
     if (state.pipeline.analyzed) {
       state.reportStatus = "复核中";
       state.pipeline.reported = true;
@@ -1770,6 +1788,7 @@ function bindEvents() {
   });
 
   el("#report-button").addEventListener("click", () => {
+    if (!state.pipeline.analyzed) return;
     if (state.pipeline.analyzed) {
       state.reportStatus = "待复核";
       state.pipeline.reported = true;
